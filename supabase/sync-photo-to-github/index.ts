@@ -18,15 +18,13 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function slugifyFileName(name: string) {
-  const clean = name
+function slugify(input: string) {
+  return input
     .toLowerCase()
     .replace(/\.[^/.]+$/, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-
-  return clean || "memory";
+    .slice(0, 60) || "memory";
 }
 
 function getExtension(fileName: string, mimeType: string) {
@@ -39,6 +37,7 @@ function getExtension(fileName: string, mimeType: string) {
   if (mimeType.includes("png")) return "png";
   if (mimeType.includes("webp")) return "webp";
   if (mimeType.includes("gif")) return "gif";
+
   return "jpg";
 }
 
@@ -46,7 +45,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
   let binary = "";
 
-  for (let i = 0; i < bytes.byteLength; i++) {
+  for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
 
@@ -54,6 +53,8 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
 }
 
 Deno.serve(async (req) => {
+  console.log("sync-photo-to-github gestart");
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -72,7 +73,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("APP_SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("APP_SERVICE_ROLE_KEY");
 
-    const missingSecrets = [];
+    const missingSecrets: string[] = [];
 
     if (!githubToken) missingSecrets.push("GITHUB_PHOTO_TOKEN");
     if (!githubOwner) missingSecrets.push("GITHUB_OWNER");
@@ -81,6 +82,8 @@ Deno.serve(async (req) => {
     if (!serviceRoleKey) missingSecrets.push("APP_SERVICE_ROLE_KEY");
 
     if (missingSecrets.length > 0) {
+      console.error("Ontbrekende secrets:", missingSecrets);
+
       return jsonResponse(
         {
           error: "Ontbrekende secrets.",
@@ -90,6 +93,8 @@ Deno.serve(async (req) => {
       );
     }
 
+    console.log("Secrets aanwezig");
+
     const formData = await req.formData();
 
     const file = formData.get("file");
@@ -98,13 +103,17 @@ Deno.serve(async (req) => {
     const thought = String(formData.get("thought") || "");
 
     if (!(file instanceof File)) {
+      console.error("Geen geldig bestand ontvangen");
+
       return jsonResponse(
         {
-          error: "Geen geldig bestand ontvangen. Verwacht formData met veld 'file'.",
+          error: "Geen geldig bestand ontvangen. Verwacht FormData met veld 'file'.",
         },
         400,
       );
     }
+
+    console.log("Bestand ontvangen:", file.name, file.type, file.size);
 
     if (!file.type.startsWith("image/")) {
       return jsonResponse(
@@ -138,12 +147,15 @@ Deno.serve(async (req) => {
 
     const originalName = file.name || "memory.jpg";
     const extension = getExtension(originalName, file.type);
-    const safeName = slugifyFileName(title || originalName);
+    const safeName = slugify(title || originalName);
 
-    const githubPath = `${githubPhotoPath}/${year}/${month}/${day}/${timestamp}-${safeName}.${extension}`;
+    const githubPath =
+      `${githubPhotoPath}/${year}/${month}/${day}/${timestamp}-${safeName}.${extension}`;
 
     const githubApiUrl =
       `https://api.github.com/repos/${githubOwner}/${githubRepo}/contents/${githubPath}`;
+
+    console.log("Upload naar GitHub:", githubPath);
 
     const githubResponse = await fetch(githubApiUrl, {
       method: "PUT",
@@ -152,6 +164,7 @@ Deno.serve(async (req) => {
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "supabase-edge-function-meals-app",
       },
       body: JSON.stringify({
         message: `Add meal memory photo: ${title}`,
@@ -163,6 +176,8 @@ Deno.serve(async (req) => {
     const githubResult = await githubResponse.json();
 
     if (!githubResponse.ok) {
+      console.error("GitHub upload mislukt:", githubResponse.status, githubResult);
+
       return jsonResponse(
         {
           error: "Upload naar GitHub is mislukt.",
@@ -177,12 +192,16 @@ Deno.serve(async (req) => {
       githubResult?.content?.download_url ||
       `https://raw.githubusercontent.com/${githubOwner}/${githubRepo}/${githubBranch}/${githubPath}`;
 
-    const supabase = createClient(supabaseUrl!, serviceRoleKey!, {
+    console.log("GitHub upload gelukt:", imageUrl);
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
       },
     });
+
+    console.log("Opslaan in memories-tabel");
 
     const { data, error } = await supabase
       .from("memories")
@@ -197,6 +216,8 @@ Deno.serve(async (req) => {
       .single();
 
     if (error) {
+      console.error("Supabase insert mislukt:", error);
+
       return jsonResponse(
         {
           error: "Foto staat in GitHub, maar opslaan in Supabase memories is mislukt.",
@@ -208,6 +229,8 @@ Deno.serve(async (req) => {
       );
     }
 
+    console.log("Memory opgeslagen:", data?.id);
+
     return jsonResponse({
       success: true,
       memory: data,
@@ -215,6 +238,8 @@ Deno.serve(async (req) => {
       github_path: githubPath,
     });
   } catch (error) {
+    console.error("Onverwachte fout:", error);
+
     return jsonResponse(
       {
         error: "Onverwachte fout in Edge Function.",
