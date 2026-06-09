@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
     const githubPhotoPath = Deno.env.get("GITHUB_PHOTO_PATH") || "assets/meals";
 
     const supabaseUrl = Deno.env.get("APP_SUPABASE_URL");
-    const serviceRoleKey = Deno.env.get("APP_SERVICE_ROLE_KEY");
+    const serviceRoleKey = Deno.env.get("APP_SUPABASE_SERVICE_ROLE_KEY");
 
     const missingSecrets: string[] = [];
 
@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
     if (!githubOwner) missingSecrets.push("GITHUB_OWNER");
     if (!githubRepo) missingSecrets.push("GITHUB_REPO");
     if (!supabaseUrl) missingSecrets.push("APP_SUPABASE_URL");
-    if (!serviceRoleKey) missingSecrets.push("APP_SERVICE_ROLE_KEY");
+    if (!serviceRoleKey) missingSecrets.push("APP_SUPABASE_SERVICE_ROLE_KEY");
 
     if (missingSecrets.length > 0) {
       console.error("Ontbrekende secrets:", missingSecrets);
