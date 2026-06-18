@@ -3,6 +3,8 @@ const state = {
   tapTimer: null,
   selectedMeal: null,
   isEditingRecipe: false,
+  photoHoldTimer: null,
+  suppressNextTap: false,
 };
 
 const els = {};
@@ -23,12 +25,14 @@ function cacheElements() {
   els.uploadEmpty = $("#uploadEmpty");
   els.formStatus = $("#formStatus");
   els.submitButton = $("#submitButton");
+
   els.infoLayer = $("#infoLayer");
   els.infoClose = $("#infoClose");
   els.infoDelete = $("#infoDelete");
   els.infoEdit = $("#infoEdit");
   els.infoTitle = $("#infoTitle");
   els.infoText = $("#infoText");
+
   els.recipeView = $("#recipeView");
   els.recipeEditForm = $("#recipeEditForm");
   els.editTitleInput = $("#editTitleInput");
@@ -36,6 +40,11 @@ function cacheElements() {
   els.editStatus = $("#editStatus");
   els.editCancel = $("#editCancel");
   els.editSave = $("#editSave");
+
+  els.photoPreviewLayer = $("#photoPreviewLayer");
+  els.photoPreviewBackdrop = $("#photoPreviewBackdrop");
+  els.photoPreviewImage = $("#photoPreviewImage");
+  els.photoPreviewClose = $("#photoPreviewClose");
 }
 
 function render() {
@@ -47,20 +56,41 @@ function render() {
     card.className = "meal-card";
     card.tabIndex = 0;
     card.dataset.id = meal.id;
+
     card.innerHTML = `
       <img loading="lazy" src="${escapeAttribute(meal.image_url)}" alt="${escapeAttribute(meal.title || "Maaltje")}" />
       <div class="name-overlay">${escapeHtml(meal.title || "Maaltje")}</div>
     `;
 
-    card.addEventListener("click", () => handleMealTap(card, meal));
+    card.addEventListener("pointerdown", (event) => startPhotoHold(event, meal));
+    card.addEventListener("pointerup", cancelPhotoHold);
+    card.addEventListener("pointerleave", cancelPhotoHold);
+    card.addEventListener("pointercancel", cancelPhotoHold);
+    card.addEventListener("contextmenu", (event) => event.preventDefault());
+
+    card.addEventListener("click", (event) => {
+      if (state.suppressNextTap) {
+        event.preventDefault();
+        event.stopPropagation();
+        state.suppressNextTap = false;
+        return;
+      }
+
+      handleMealTap(card, meal);
+    });
+
     card.addEventListener("dblclick", (event) => {
       event.preventDefault();
       clearTimeout(state.tapTimer);
       state.tapTimer = null;
       showRecipe(meal);
     });
+
     card.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") showRecipe(meal);
+      if (event.key === "Enter") {
+        showRecipe(meal);
+      }
+
       if (event.key === " ") {
         event.preventDefault();
         toggleName(card);
@@ -69,6 +99,58 @@ function render() {
 
     els.grid.appendChild(card);
   }
+}
+
+function startPhotoHold(event, meal) {
+  if (event.button !== undefined && event.button !== 0) return;
+
+  cancelPhotoHold();
+
+  state.photoHoldTimer = window.setTimeout(() => {
+    state.photoHoldTimer = null;
+    state.suppressNextTap = true;
+
+    clearTimeout(state.tapTimer);
+    state.tapTimer = null;
+
+    openPhotoPreview(meal);
+  }, 580);
+}
+
+function cancelPhotoHold() {
+  if (!state.photoHoldTimer) return;
+
+  clearTimeout(state.photoHoldTimer);
+  state.photoHoldTimer = null;
+}
+
+function openPhotoPreview(meal) {
+  if (!meal || !meal.image_url) return;
+  if (!els.photoPreviewLayer || !els.photoPreviewImage) return;
+
+  els.photoPreviewImage.src = meal.image_url;
+  els.photoPreviewImage.alt = meal.title || "Maaltje";
+  els.photoPreviewLayer.hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closePhotoPreview() {
+  cancelPhotoHold();
+
+  if (!els.photoPreviewLayer || els.photoPreviewLayer.hidden) return;
+
+  els.photoPreviewLayer.hidden = true;
+
+  if (els.photoPreviewImage) {
+    els.photoPreviewImage.removeAttribute("src");
+    els.photoPreviewImage.alt = "";
+  }
+
+  document.body.style.overflow = "";
+
+  window.setTimeout(() => {
+    state.suppressNextTap = false;
+  }, 0);
 }
 
 function handleMealTap(card, meal) {
@@ -87,16 +169,21 @@ function handleMealTap(card, meal) {
 
 function toggleName(card) {
   document.querySelectorAll(".meal-card.show-name").forEach((openCard) => {
-    if (openCard !== card) openCard.classList.remove("show-name");
+    if (openCard !== card) {
+      openCard.classList.remove("show-name");
+    }
   });
+
   card.classList.toggle("show-name");
 }
 
 function showRecipe(meal) {
   state.selectedMeal = meal;
   state.isEditingRecipe = false;
+
   fillRecipeView(meal);
   showRecipeViewMode();
+
   els.infoDelete.textContent = "Verwijderen";
   els.infoDelete.disabled = false;
   els.infoLayer.hidden = false;
@@ -111,17 +198,22 @@ function fillRecipeView(meal) {
 function closeRecipe() {
   els.infoLayer.hidden = true;
   document.body.style.overflow = "";
+
   state.selectedMeal = null;
   state.isEditingRecipe = false;
+
   els.infoDelete.disabled = false;
   els.editSave.disabled = false;
+
   showRecipeViewMode();
 }
 
 function showRecipeViewMode() {
   state.isEditingRecipe = false;
+
   els.recipeView.hidden = false;
   els.recipeEditForm.hidden = true;
+
   els.editStatus.textContent = "";
   els.editStatus.classList.remove("error");
 }
@@ -131,40 +223,54 @@ function showRecipeEditMode() {
   if (!meal) return;
 
   state.isEditingRecipe = true;
+
   els.recipeView.hidden = true;
   els.recipeEditForm.hidden = false;
+
   els.editTitleInput.value = meal.title || "";
   els.editRecipeInput.value = meal.thought || "";
+
   els.editSave.disabled = false;
   els.editSave.textContent = "Opslaan";
+
   els.editStatus.textContent = "";
   els.editStatus.classList.remove("error");
+
   setTimeout(() => els.editTitleInput.focus(), 50);
 }
 
 function openSheet() {
   els.backdrop.hidden = false;
   els.sheet.hidden = false;
+
   document.body.style.overflow = "hidden";
+
   els.formStatus.textContent = "";
   els.formStatus.classList.remove("error");
+
   setTimeout(() => $("#nameInput")?.focus(), 50);
 }
 
 function closeSheet() {
   els.backdrop.hidden = true;
   els.sheet.hidden = true;
+
   document.body.style.overflow = "";
+
   resetForm();
 }
 
 function resetForm() {
   els.form.reset();
+
   els.photoPreview.hidden = true;
   els.photoPreview.removeAttribute("src");
+
   els.uploadEmpty.hidden = false;
+
   els.formStatus.textContent = "";
   els.formStatus.classList.remove("error");
+
   els.submitButton.disabled = false;
   els.submitButton.textContent = "Opslaan";
 }
@@ -172,7 +278,9 @@ function resetForm() {
 function handleFilePreview() {
   const file = els.fileInput.files?.[0];
   if (!file) return;
+
   const url = URL.createObjectURL(file);
+
   els.photoPreview.src = url;
   els.photoPreview.hidden = false;
   els.uploadEmpty.hidden = true;
@@ -183,6 +291,7 @@ async function handleSubmit(event) {
 
   const form = new FormData(els.form);
   const file = els.fileInput.files?.[0];
+
   const payload = {
     title: String(form.get("title") || "").trim(),
     type: "photo",
@@ -206,12 +315,16 @@ async function handleSubmit(event) {
 
   try {
     const meal = await window.MealsSupabase.createMemoryViaEdgeFunction(payload);
+
     state.meals = [meal, ...state.meals.filter((item) => item.id !== meal.id)];
+
     render();
     closeSheet();
   } catch (error) {
     console.error(error);
+
     setStatus("Opslaan lukte nog niet.", true);
+
     els.submitButton.disabled = false;
     els.submitButton.textContent = "Opslaan";
   }
@@ -242,15 +355,27 @@ async function handleEditSubmit(event) {
       thought,
     });
 
-    const mergedMeal = { ...meal, ...updatedMeal, title, thought };
-    state.meals = state.meals.map((item) => (item.id === meal.id ? mergedMeal : item));
+    const mergedMeal = {
+      ...meal,
+      ...updatedMeal,
+      title,
+      thought,
+    };
+
+    state.meals = state.meals.map((item) => {
+      return item.id === meal.id ? mergedMeal : item;
+    });
+
     state.selectedMeal = mergedMeal;
+
     fillRecipeView(mergedMeal);
     render();
     showRecipeViewMode();
   } catch (error) {
     console.error(error);
+
     setEditStatus("Bewerken lukte nog niet.", true);
+
     els.editSave.disabled = false;
     els.editSave.textContent = "Opslaan";
   }
@@ -268,13 +393,17 @@ async function deleteSelectedMeal() {
 
   try {
     await window.MealsSupabase.deleteMemoryViaEdgeFunction(meal);
+
     state.meals = state.meals.filter((item) => item.id !== meal.id);
+
     render();
     closeRecipe();
   } catch (error) {
     console.error(error);
+
     els.infoDelete.disabled = false;
     els.infoDelete.textContent = "Verwijderen";
+
     window.alert("Verwijderen lukte nog niet.");
   }
 }
@@ -293,22 +422,44 @@ function bindEvents() {
   els.addOpen.addEventListener("click", openSheet);
   els.addClose.addEventListener("click", closeSheet);
   els.backdrop.addEventListener("click", closeSheet);
+
   els.fileInput.addEventListener("change", handleFilePreview);
   els.form.addEventListener("submit", handleSubmit);
+
   els.infoClose.addEventListener("click", closeRecipe);
   els.infoDelete.addEventListener("click", deleteSelectedMeal);
   els.infoEdit.addEventListener("click", showRecipeEditMode);
+
   els.editCancel.addEventListener("click", showRecipeViewMode);
   els.recipeEditForm.addEventListener("submit", handleEditSubmit);
+
+  els.photoPreviewClose?.addEventListener("click", closePhotoPreview);
+  els.photoPreviewBackdrop?.addEventListener("click", closePhotoPreview);
+
   els.infoLayer.addEventListener("click", (event) => {
-    if (event.target === els.infoLayer && !state.isEditingRecipe) closeRecipe();
+    if (event.target === els.infoLayer && !state.isEditingRecipe) {
+      closeRecipe();
+    }
   });
+
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      if (!els.sheet.hidden) closeSheet();
-      if (!els.infoLayer.hidden) {
-        if (state.isEditingRecipe) showRecipeViewMode();
-        else closeRecipe();
+    if (event.key !== "Escape") return;
+
+    if (els.photoPreviewLayer && !els.photoPreviewLayer.hidden) {
+      closePhotoPreview();
+      return;
+    }
+
+    if (!els.sheet.hidden) {
+      closeSheet();
+      return;
+    }
+
+    if (!els.infoLayer.hidden) {
+      if (state.isEditingRecipe) {
+        showRecipeViewMode();
+      } else {
+        closeRecipe();
       }
     }
   });
@@ -316,18 +467,23 @@ function bindEvents() {
 
 async function boot() {
   cacheElements();
+
   window.MealsSupabase.initSupabase();
+
   bindEvents();
   render();
   registerServiceWorker();
 
   const remoteMeals = await window.MealsSupabase.fetchMemoriesFromSupabase();
+
   state.meals = remoteMeals.filter((meal) => meal && meal.image_url);
+
   render();
 }
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
+
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("service-worker.js").catch((error) => {
       console.warn("Service worker registreren lukte niet.", error);
@@ -336,7 +492,14 @@ function registerServiceWorker() {
 }
 
 function escapeHtml(value) {
-  return String(value).replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char]));
+  return String(value).replace(/[&<>"]/g, (char) => {
+    return {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+    }[char];
+  });
 }
 
 function escapeAttribute(value) {
